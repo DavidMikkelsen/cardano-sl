@@ -2,13 +2,17 @@ module Pos.Aeson.ClientTypes
        (
        ) where
 
+import           Data.Aeson                   (ToJSON (..), object, (.=))
 import           Data.Aeson.TH                (defaultOptions, deriveJSON, deriveToJSON)
+import           Universum
+
 import           Pos.Core.Types               (SoftwareVersion (..))
+import           Pos.Launcher                 (gitRev)
 import           Pos.Util.BackupPhrase        (BackupPhrase)
-import           Pos.Wallet.Web.ClientTypes   (Addr, CAccount, CAccountId, CAccountInit,
-                                               CAccountMeta, CAddress, CCoin, CHash, CId,
-                                               CInitialized, CInitialized,
-                                               CPaperVendWalletRedeem, CProfile, CProfile,
+import           Pos.Wallet.Web.ClientTypes   (Addr, ApiVersion (..), CAccount,
+                                               CAccountId, CAccountInit, CAccountMeta,
+                                               CAddress, CCoin, CHash, CId, CInitialized,
+                                               CPaperVendWalletRedeem, CProfile,
                                                CPtxCondition, CTExMeta, CTx, CTxId,
                                                CTxMeta, CUpdateInfo, CWAddressMeta,
                                                CWallet, CWalletAssurance, CWalletInit,
@@ -49,3 +53,10 @@ deriveJSON defaultOptions ''CUpdateInfo
 deriveToJSON defaultOptions ''SyncProgress
 deriveToJSON defaultOptions ''NotifyEvent
 deriveToJSON defaultOptions ''WalletError
+
+instance ToJSON ApiVersion where
+    toJSON ApiVersion0 =
+        object ["version" .= versionName, "gitRev" .= gitRev]
+      where
+        versionName :: Text
+        versionName = "v0"

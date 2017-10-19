@@ -36,6 +36,7 @@ module Pos.Wallet.Web.ClientTypes.Types
       , CElectronCrashReport (..)
       , Wal (..)
       , Addr (..)
+      , ApiVersion (..)
       ) where
 
 import           Universum
@@ -332,3 +333,16 @@ data CElectronCrashReport = CElectronCrashReport
     , cecCompanyName :: Text
     , cecUploadDump  :: FileData
     } deriving (Show, Generic)
+
+----------------------------------------------------------------------------
+-- Version
+----------------------------------------------------------------------------
+
+-- | Version of API. Currently we have only 0-th version. We will add
+-- new constructors when new versions appear.
+data ApiVersion =
+    ApiVersion0
+    deriving (Show, Generic)
+
+instance Buildable ApiVersion where
+    build ApiVersion0 = "ApiVersion0"
