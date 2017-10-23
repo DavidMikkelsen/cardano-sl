@@ -1,14 +1,42 @@
 Overview
 ========
 
-Software update is a protocol mechanism that allows nodes to agree on software changes without altering protocol constants and update to this software version.
+Software update is a protocol mechanism that allows nodes to agree on
+software changes without altering protocol constants and update to
+this software version.
+
+Protocol update is a different protocol mechanism that allows nodes to
+agree on protocol changes without breaking compatibility with older
+versions. Protocol update must be done with software update
+(i. e. it's impossible to make a protocol update without a software
+update). Note, however, that software update can be done for only one
+software. Usually it will be `cardano-sl` which is used by core and
+relay nodes and differs from `csl-daedalus` which is used by end users.
+
+Flow for an update is the following (brief sketch, no details):
 1. Software update is proposed. Proposal is a datatype that gets into
    the blockchain. It contains information about version changes and
-   hashes of update files.
-2. Update files are uploaded to the S3 bucket.
-3. Software update is confirmed by voting from majority of nodes.
-4. Nodes that see an update try to download and apply it
-   automatically.
+   hashes of update files. It also contains `BlockVersion` and
+   `BlockVersionData`. They define protocol version and its
+   parameters. They can be the same as the previous ones (in which
+   case there is no protocol update) or can differ (then there is also
+   a protocol update).
+2. New software is prepared, some values in configuration are
+   changed. If we want to update `csl-daedalus`, new installers are
+   prepared. If we want to update `cardano-sl`, everything should be
+   setup to redeploy core and relay nodes.
+3. If wallets should be updated, installers are uploaded to the S3 bucket.
+4. An update is confirmed by voting from majority of nodes.
+5. Nodes that see an update try to download and apply it
+   automatically. Currently it's enabled only for wallets
+   (`csl-daedalus`), core and relay nodes are controlled by us.
+6 (Protocol update case). Core and relay nodes are restarted with
+   newer configuration and start using newer `BlockVersion`. Their
+   `BlockVersion`s are included into created blocks.
+7 (Protocol update case). When almost all nodes (90% in mainnet, but
+   this value is configurable and slowly decreases over time after an update
+   is confirmed) create a block with newer `BlockVersion`, it gets
+   adopted and all nodes in the network adhere to the newest protocol.
 
 Now, again, step-by-step.
 
@@ -23,7 +51,7 @@ Prerequisites
    only nodes that can propose an update and vote for it. It's enough
    to have keys for majority of stake. In mainnet we have 7 core nodes
    with equal stake, so 4 keys should be enough.
-2. Access to the S3 bucket
+2. Access to the S3 bucket (if wallets are updated).
 3. Software version
    - Single integer, must be greater by 1 than the last confirmed
      version. Initially `csl-daedalus` application has version 0. The
@@ -33,8 +61,13 @@ Prerequisites
    - Node knows its software version from `configuration.yaml` file,
      `applicationVersion` field. When you propose an update to version
      X, make sure that all attached installers use configuration with
-     `applicationVersion` set to `X`.
-4. Installers corresponding to software version we're pushing to cluster
+     `applicationVersion` set to `X` (described below).
+4. Block version and block version data. Block version consists of
+   three integers. Block version data contains various parameters of the
+   protocol. Currently the best way to figure out these values is to ask
+   in Slack. To be improved…
+5.1 (if wallets are updated). Installers corresponding to software
+     version we're pushing to cluster
    - Those are two executables (exe for win, pkg for mac) which are to
      be provided by QA (after QA procedures passed). They are
      installers provided by our CI.
@@ -44,13 +77,29 @@ Prerequisites
      M > N will result in the infinite installer loop (Daedalus thinks
      it is N, it downloads M, updates to it, but N is installed repeats), so
      versions should be double-checked.
+5.2 (if core/relay nodes are updated). Core and relay nodes should be
+     ready to be restarted with updated software and
+     configuration. Note: even if we don't update any logic in code (which can
+     be the case if we only want to update some parameters of the
+     protocol), at least configuration must be changed, so restart is
+     always necessary (recompilation is not).
 
 
 Proposing the update
 ====================
 
-Preparations
-------------
+Configuration
+-------------
+
+You need to have software (with proper configuration) which is ready
+to be used as soon as update proposal is confirmed. Pay very close
+attention to the configuration and check that `applicationVersion` and
+`lastKnownBlockVersion` are the same as the values you are going to
+use in update proposal (for the corresponding configuration key)! If
+they are not, set by yourself or ask someone to do it.
+
+Environment preparations
+------------------------
 
 You need to build packages `cardano-sl-tools` and `cardano-sl-auxx`. Branch's code should be compatible with cluster (take release branch, e.g. `cardano-sl-1.0`).
 
@@ -68,6 +117,9 @@ COMMONOPTS="--system-start 0 --configuration-file ../cardano-sl/node/configurati
 
 AUXXOPTS="--log-config ../cardano-sl/scripts/log-templates/log-config-qa.yaml --logs-prefix logs/aux-update.1.0.1 --db-path aux-update-1.0.1 --peer ${RELAY_PEER}"
 ```
+
+Note: you can change the paths above (ending with `aux-update-1.0.1`)
+to desired locations.
 
 Rearranging the keys
 --------------------
@@ -104,20 +156,41 @@ DARWIN_INSTALLER=Daedalus-installer-1.0-rc.3202.pkg
 To create and send an update proposal, you need to run this command:
 
 ```
-stack exec -- cardano-auxx $COMMONOPTS $AUXXOPTS cmd --commands "propose-update 0 0.0.0 65536 70000 csl-daedalus:1 win64 ${WIN64_INSTALLER} none macos64 ${DARWIN_INSTALLER} none"
+stack exec -- cardano-auxx $COMMONOPTS $AUXXOPTS cmd --commands "propose-update 0 0.1.0 65536 70000 <software-version> [win64 ${WIN64_INSTALLER} none macos64 ${DARWIN_INSTALLER} none]"
+```
+
+Examples:
+
+```
+stack exec -- cardano-auxx $COMMONOPTS $AUXXOPTS cmd --commands "propose-update 0 0.1.0 65536 70000 csl-daedalus:1 win64 ${WIN64_INSTALLER} none macos64 ${DARWIN_INSTALLER} none"
+stack exec -- cardano-auxx $COMMONOPTS $AUXXOPTS cmd --commands "propose-update 0 0.1.0 65536 70000 cardano-sl:1"
 ```
 
 Let's break down the invocation of `propose-update`. First come arguments that you almost certainly won't need to modify:
 
 * `0` is the index of key that will be used to sign the update.
-* `0.0.0` is block version to be used after the update. Currently it's `0.0.0` as well and so the update won't change the block version.
+* `0.1.0` is block version to be used after the
+  update. See [Prerequisites](#prerequisites), you should know it in
+  advance. `0.1.0` is used as an example.
 * `65536` is maximal tx size. Should be set to this value (`65536`) in `0.1.0`.
 * `70000` is maximal size of update proposal. Should be set to this
   value (`70000`) in `0.1.0`.
 
-The next argument (`csl-daedalus:1`) is software version description. You should substitute `1` (version) with the integer provided along with installers (see *Prerequisites* section).
+The next argument (`<software-version>`, e. g. `csl-daedalus:1`) is
+software version description. You should substitute `1` (version) with
+the integer provided along with installers (see *Prerequisites*
+section). NOTE: currently we are maintaining two softwares:
+`cardano-sl` (used by core and relay nodes) and `csl-daedalus` (used
+by wallets).
 
-Next follow an arbitrary number of _triples_ (two in our case, one for Windows and one for macOS). Each triple is `<system tag> <installer filename> none`. Once again, those are filenames in the current dir, not arbitrary paths. `none` stands for binary diff (this feature is not used for now).
+Further arguments are optional, should be provided if we want to
+update software automatically (which should be true for `csl-daedalus`
+and false for `cardano-sl`). Those arguments are an arbitrary number
+of _triples_ (two in `csl-daedalus` case, one for Windows and one for
+macOS). Each triple is `<system tag> <installer filename> none`. Once
+again, those are filenames in the current dir, not arbitrary
+paths. `none` stands for binary diff (this feature is not used for
+now).
 
 Successfull command output looks like this:
 
@@ -199,3 +272,20 @@ Deleting artefacts
 
 After everything is done don't forget to destroy `secret.key` file
 because it contains private information (secret keys of core nodes).
+
+Restarting core and relay nodes (if necessary)
+==============================================
+
+If the goal is to update core and relay nodes, they should be
+restarted manually after the update proposal is confirmed. It happens
+`k` blocks after the update proposal is approved. When proposal is
+confirmed, you will such see message (hash will be different of course):
+
+> Proposal 4c827d6fe is confirmed
+
+After that you should restart core and relay nodes with newer
+configuration. When 90% of nodes (by stake) create blocks with never
+`BlockVersion` it will be adopted. When it's adopted, there should be
+such message in logs:
+
+> BlockVersion is adopted: <version>; winning block was <hash>
