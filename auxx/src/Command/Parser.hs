@@ -124,7 +124,7 @@ proposeUpdateParams =
     lexeme parseIntegralSafe <*>
     lexeme parseIntegralSafe <*>
     lexeme parseSoftwareVersion <*>
-    many1 parseProposeUpdateSystem
+    many parseProposeUpdateSystem
 
 proposeUpdate :: Parser Command
 proposeUpdate = ProposeUpdate <$> proposeUpdateParams
